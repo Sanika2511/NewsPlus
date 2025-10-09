@@ -1,14 +1,9 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import os
 from dotenv import load_dotenv
 import requests
 import mysql.connector
 from datetime import datetime
+from text_processing import preprocess_text  # Import preprocessing function
 
 load_dotenv()
 
@@ -31,25 +26,26 @@ def convert_publishedAt(publishedAt_str):
 def insert_news(article):
     conn = connect_db()
     cursor = conn.cursor()
-
     cursor.execute("SELECT COUNT(1) FROM news WHERE url = %s", (article.get("url"),))
     exists = cursor.fetchone()[0]
-
     if exists:
-        # Skip duplicates
         cursor.close()
         conn.close()
         return
-
     published = convert_publishedAt(article.get("publishedAt"))
+
+    # Preprocess title and description before storing
+    cleaned_title = preprocess_text(article.get("title", ""))
+    cleaned_description = preprocess_text(article.get("description", ""))
+
     cursor.execute(
         "INSERT INTO news (title, source, publishedAt, url, description, imageurl) VALUES (%s, %s, %s, %s, %s, %s)",
         (
-            article.get("title"),
+            cleaned_title,
             article.get("source", {}).get("name"),
             published,
             article.get("url"),
-            article.get("description"),
+            cleaned_description,
             article.get("urlToImage"),
         )
     )
@@ -57,29 +53,15 @@ def insert_news(article):
     cursor.close()
     conn.close()
 
-def fetch_and_store_for_topic(topic):
+def fetch_live_news(topic, num_articles=10):
     NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
-    url = f"https://newsapi.org/v2/everything?q={topic}&pageSize=10&apiKey={NEWSAPI_KEY}"
+    url = f"https://newsapi.org/v2/everything?q={topic}&pageSize={num_articles}&apiKey={NEWSAPI_KEY}"
     response = requests.get(url)
     data = response.json()
     articles = data.get("articles", [])
-    print(f"Fetched {len(articles)} articles for topic '{topic}'. Inserting up to 20...")
-    for article in articles[:20]:
+    return articles[:num_articles]
+
+def store_articles(articles):
+    for article in articles:
         if article.get("title"):
             insert_news(article)
-    print("Insertion complete.")
-
-if __name__ == "__main__":
-    admin_choice = input("Admin: Do you want to fetch news for a topic? (y/n): ").strip().lower()
-    if admin_choice == 'y':
-        topic = input("Enter a topic to fetch news for: ")
-        fetch_and_store_for_topic(topic)
-    else:
-        print("Skipping news fetch for this run.")
-
-
-# In[ ]:
-
-
-
-
